@@ -7,11 +7,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Android NDK
         id: ndk
@@ -19,7 +24,22 @@ jobs:
         with:
           ndk-version: r26d
 
-      - name: Build native libraries + package module
+      - name: Resolve version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VER="${GITHUB_REF#refs/tags/}"                       # e.g. v1.0
+            n="${VER#v}"; IFS='.' read -r a b c <<< "$n"
+            VCODE=$(( ${a:-0} * 10000 + ${b:-0} * 100 + ${c:-0} ))
+          else
+            VER="$(grep '^version=' module/module.prop | cut -d= -f2)"
+            VCODE="$(grep '^versionCode=' module/module.prop | cut -d= -f2)"
+          fi
+          echo "VER=$VER"     >> "$GITHUB_ENV"
+          echo "VCODE=$VCODE" >> "$GITHUB_ENV"
+          echo "Resolved version: $VER ($VCODE)"
+
+      - name: Build native + package
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
@@ -36,7 +56,6 @@ jobs:
             [x86]=i686-linux-android26
             [x86_64]=x86_64-linux-android26
           )
-
           mkdir -p stage/zygisk
           for abi in "${!T[@]}"; do
             "$CLANG" --target="${T[$abi]}" -std=c++17 -O2 -fPIC -fvisibility=hidden \
@@ -46,10 +65,12 @@ jobs:
             echo "built $abi"
           done
 
-          # Assemble the flashable module (runtime files only — no native source).
+          # Flashable module (runtime files only). The version is stamped into the
+          # packaged copy from the resolved version — the source tree is untouched.
           cp module/module.prop module/customize.sh module/uninstall.sh \
              module/targets.conf module/props.conf stage/
-          VER="$(grep '^version=' module/module.prop | cut -d= -f2)"
+          sed -i "s/^version=.*/version=$VER/"           stage/module.prop
+          sed -i "s/^versionCode=.*/versionCode=$VCODE/" stage/module.prop
           ( cd stage && zip -r9 "../6axmyT-$VER.zip" . )
           ls -la 6axmyT-*.zip
 
@@ -60,8 +81,32 @@ jobs:
           path: 6axmyT-*.zip
           if-no-files-found: error
 
-      - name: Attach to release
+      - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: 6axmyT-*.zip
+
+      # Keep module/update.json (and module.prop) on main pointing at the latest
+      # release, so the module's in-app updater always sees the newest version.
+      - name: Publish update.json to main
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git switch main
+          sed -i "s/^version=.*/version=$VER/"           module/module.prop
+          sed -i "s/^versionCode=.*/versionCode=$VCODE/" module/module.prop
+          cat > module/update.json <<EOF
+          {
+            "version": "$VER",
+            "versionCode": $VCODE,
+            "zipUrl": "https://github.com/${GITHUB_REPOSITORY}/releases/download/$VER/6axmyT-$VER.zip",
+            "changelog": "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/README.md"
+          }
+          EOF
+          git add module/module.prop module/update.json
+          git commit -m "release $VER: sync module.prop + update.json [skip ci]" || { echo "nothing to commit"; exit 0; }
+          git push origin main

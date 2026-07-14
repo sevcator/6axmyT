@@ -1,7 +1,7 @@
 id=cloak
 name=6axmyT
-version=v0.1.0
-versionCode=1
+version=v1.0
+versionCode=10000
 author=sevcator
 description=Make your device undetectable for some apps
-updateJson=
+updateJson=https://raw.githubusercontent.com/sevcator/6axmyT/main/module/update.json
