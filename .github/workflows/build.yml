@@ -13,32 +13,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
       - name: Set up Android NDK
         id: ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
 
-      - name: Build module
+      - name: Build native libraries + package module
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: bash scripts/build.sh
+        run: |
+          set -euo pipefail
+          CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+          SRC="module/native"
+
+          # Pinned upstream Zygisk API header (ABI contract). Update deliberately.
+          curl -fsSL "https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp" -o "$SRC/zygisk.hpp"
+
+          declare -A T=(
+            [arm64-v8a]=aarch64-linux-android26
+            [armeabi-v7a]=armv7a-linux-androideabi26
+            [x86]=i686-linux-android26
+            [x86_64]=x86_64-linux-android26
+          )
+
+          mkdir -p stage/zygisk
+          for abi in "${!T[@]}"; do
+            "$CLANG" --target="${T[$abi]}" -std=c++17 -O2 -fPIC -fvisibility=hidden \
+              -ffunction-sections -fdata-sections -shared -Wl,--gc-sections \
+              -I "$SRC" "$SRC/main.cpp" "$SRC/config.cpp" "$SRC/hooks.cpp" \
+              -static-libstdc++ -llog -o "stage/zygisk/$abi.so"
+            echo "built $abi"
+          done
+
+          # Assemble the flashable module (runtime files only — no native source).
+          cp module/module.prop module/customize.sh module/uninstall.sh \
+             module/targets.conf module/props.conf stage/
+          VER="$(grep '^version=' module/module.prop | cut -d= -f2)"
+          ( cd stage && zip -r9 "../6axmyT-$VER.zip" . )
+          ls -la 6axmyT-*.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cloak
-          path: out/cloak-*.zip
+          name: 6axmyT
+          path: 6axmyT-*.zip
           if-no-files-found: error
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: out/cloak-*.zip
+          files: 6axmyT-*.zip

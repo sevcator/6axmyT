@@ -152,8 +152,8 @@ static const HookSpec kHooks[] = {
 // NOTE: this is a one-shot pass at specialize time. Libraries an app dlopen()s
 // *later* are not covered — Zygisk's PLT hook is not safe to re-commit at
 // arbitrary runtime points (it corrupts state when called from e.g. the render
-// thread mid graphics-driver load). Covering late-loaded libs needs a
-// runtime-safe inline/PLT hook library (e.g. bytehook); see docs/PROFILES.md.
+// thread mid graphics-driver load). Covering late-loaded libs would need a
+// runtime-safe inline/PLT hook library (e.g. bytehook).
 void install_hooks(zygisk::Api *api, const Config *cfg) {
     g_cfg = cfg;
 

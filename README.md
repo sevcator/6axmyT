@@ -2,45 +2,37 @@
 
 **Make your device undetectable for some apps.**
 
-A configurable Zygisk module that makes root **invisible to selected apps**
-in-process, with an optional hook layer for neutralizing app-side detection —
-without changing anything system-wide. (Magisk module id / internal codename:
-`cloak`.)
+A configurable Zygisk module that makes root **invisible to selected apps**,
+in-process — without changing anything system-wide. (Magisk module id / internal
+codename: `cloak`.)
 
 ## Design
 
-Two layers:
+For every app process that matches the config, the module — inside that process
+only:
 
-1. **Native in-process cloaking (core, always on for targets).**
-   For every app process that matches the config, the Zygisk module, inside that
-   process only:
-   - asks the loader to run its denylist unmount (`FORCE_DENYLIST_UNMOUNT`),
-     removing Magisk / overlay / tmpfs mounts and `su` bind-mounts — root
-     disappears from the filesystem the app sees,
-   - installs libc **PLT hooks** that make `su`/magisk paths look non-existent to
-     `access`/`stat`/`open`/`readlink` (belt-and-suspenders for anything the
-     unmount misses), and
-   - installs libc PLT hooks on `__system_property_get` /
-     `__system_property_read_callback` that return **faked property values**
-     (from `props.conf`) — only inside cloaked apps.
-   The result: file-, mount-, `PATH`- and property-based root checks find
-   nothing, and **no `su` surface is exposed at all** — the app can neither
-   detect nor request root. Nothing is changed for any other process.
+- asks the loader to run its denylist unmount (`FORCE_DENYLIST_UNMOUNT`),
+  removing Magisk / overlay / tmpfs mounts and `su` bind-mounts, so root
+  disappears from the filesystem the app sees;
+- installs libc **PLT hooks** that make `su`/magisk paths look non-existent to
+  `access`/`stat`/`open`/`readlink` (belt-and-suspenders for anything the
+  unmount misses);
+- installs libc PLT hooks on `__system_property_get` /
+  `__system_property_read_callback` that return **faked property values** from
+  `props.conf` (off by default).
 
-2. **Companion-DEX hook layer (optional, per-app profiles — see `docs/PROFILES.md`).**
-   For apps that run their own *native* detection library (e.g. a bespoke
-   `libdetector.so` reached through Java `native` bridge methods), the module can
-   additionally load a companion DEX and hook those specific Java bridge methods
-   in-process. This is the approach validated separately; it is documented as an
-   extension and is **not required** for the native core above.
-
-Nothing is written to system properties globally and no DenyList is required —
-everything happens inside the target process.
+The result: file-, mount-, `PATH`- and property-based root checks find nothing,
+and **no `su` surface is exposed at all** — the app can neither detect nor
+request root. Nothing changes for any other process; no system-wide edits, no
+DenyList.
 
 ## Configuration
 
-Runtime config lives at `/data/adb/cloak/targets.conf` (installed from
-`config/targets.conf` on first install; never overwritten on upgrade).
+Runtime config lives in `/data/adb/cloak/` (installed from the `module/*.conf`
+defaults on first install; never overwritten on upgrade). Edit and reopen the
+target app — no reboot needed.
+
+`targets.conf`:
 
 ```conf
 # mode = whitelist  -> ONLY the apps listed below are cloaked
@@ -51,49 +43,56 @@ ru.nspk.mirpay
 ru.nspk.sbpay
 ```
 
-- Add an app to anti-detection: put its package on its own line (whitelist mode).
-- Cloak everything except a few apps: set `mode = blacklist` and list the
-  exceptions (e.g. your banking app's own allowlist, dev tools).
+- Add an app: put its package on its own line (whitelist mode).
+- Cloak everything except a few: `mode = blacklist` + list the exceptions.
+- Unknown/uninstalled packages are ignored, so extra lines are harmless.
 
-Edit the file and reopen the target app — no reboot needed.
+`props.conf` optionally fakes system properties inside cloaked apps. It is
+disabled by default: it only reaches libraries mapped at process start, so an
+app's own late-loaded native library still reads the real values, which can
+create a cross-source drift that property/coherence detectors flag. Root-hiding
+does not need it.
 
 ## Building
 
-Local builds need the Android NDK; CI does it for you. See
-`.github/workflows/build.yml`. The workflow builds `libcloak.so` for all four
-ABIs and packages a flashable `cloak-<ver>.zip`.
+CI builds it on every push — see `.github/workflows/build.yml`. It compiles
+`libcloak.so` for all four ABIs with the NDK and packages a flashable
+`6axmyT-<ver>.zip` (download from the run's **Artifacts**, or from **Releases**
+on a `v*` tag).
 
-Manual:
+Locally you need the Android NDK. Fetch the pinned Zygisk header first, then
+compile per ABI (arm64 shown):
 
 ```sh
-ANDROID_NDK_HOME=/path/to/ndk ./scripts/build.sh
-# -> out/cloak-<ver>.zip
+NDK=/path/to/android-ndk
+CLANG="$NDK/toolchains/llvm/prebuilt/<host>-x86_64/bin/clang++"
+curl -fsSL https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp \
+  -o module/native/zygisk.hpp
+"$CLANG" --target=aarch64-linux-android26 -std=c++17 -O2 -fPIC -fvisibility=hidden \
+  -shared -I module/native \
+  module/native/main.cpp module/native/config.cpp module/native/hooks.cpp \
+  -static-libstdc++ -llog -o zygisk/arm64-v8a.so
 ```
 
 ## Layout
 
 ```
-antidetect/
-├── config/targets.conf            # default target list (shipped, user-editable)
-├── config/props.conf              # default faked props (shipped, user-editable)
-├── magisk-module/                 # Magisk module skeleton (packaged)
-├── native/                        # Zygisk module C++ (libcloak.so)
-├── scripts/build.sh               # fetch header + native build + zip
-├── docs/PROFILES.md               # optional companion-DEX hook layer
-└── .github/workflows/build.yml    # CI
+.github/workflows/build.yml   # CI: build all ABIs + package zip
+module/
+├── module.prop               # Magisk module metadata
+├── customize.sh              # installer (checks Zygisk, installs config)
+├── uninstall.sh              # removes /data/adb/cloak on uninstall
+├── targets.conf              # default target list (user-editable)
+├── props.conf                # default faked props (disabled by default)
+└── native/                   # Zygisk module C++ sources (built by CI)
 ```
 
-## Status (v1 — native, no DEX required)
+## Scope
 
-- Config parsing (whitelist/blacklist) + per-app injection decision: done.
-- Root companion (serves root-only config to app processes): done.
-- Root-hiding: `FORCE_DENYLIST_UNMOUNT` + libc PLT hooks hiding su/magisk paths
-  from file checks: done.
-- Property faking inside cloaked apps via libc PLT hooks
-  (`__system_property_get`, `__system_property_read_callback`): done.
-- App-specific Java-level detector neutralization (hooking an app's own native
-  bridge methods): documented extension, see `docs/PROFILES.md`.
+Native, no DEX: config-driven whitelist/blacklist targeting, root-hiding
+(`FORCE_DENYLIST_UNMOUNT` + libc PLT file-hiding), optional property faking.
 
-Hardware attestation (TEE / verified-boot key attestation) is **out of scope**:
-it is verified off-device and cannot be spoofed in-process on an unlocked
-bootloader.
+Out of scope: hardware attestation (TEE / verified-boot key attestation) is
+verified off-device and cannot be spoofed in-process on an unlocked bootloader.
+An app's own late-`dlopen`'d native detector is likewise not covered by the
+one-shot PLT pass (that would need a runtime-safe hook library such as bytehook).
