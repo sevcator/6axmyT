@@ -60,7 +60,7 @@ jobs:
           for abi in "${!T[@]}"; do
             "$CLANG" --target="${T[$abi]}" -std=c++17 -O2 -fPIC -fvisibility=hidden \
               -ffunction-sections -fdata-sections -shared -Wl,--gc-sections \
-              -I "$SRC" "$SRC/main.cpp" "$SRC/config.cpp" "$SRC/hooks.cpp" \
+              -I "$SRC" "$SRC/main.cpp" "$SRC/config.cpp" "$SRC/hooks.cpp" "$SRC/spoof.cpp" \
               -static-libstdc++ -llog -o "stage/zygisk/$abi.so"
             echo "built $abi"
           done
@@ -68,7 +68,7 @@ jobs:
           # Flashable module (runtime files only). The version is stamped into the
           # packaged copy from the resolved version — the source tree is untouched.
           cp module/module.prop module/customize.sh module/uninstall.sh \
-             module/targets.conf module/props.conf stage/
+             module/targets.conf module/props.conf module/pif.conf stage/
           sed -i "s/^version=.*/version=$VER/"           stage/module.prop
           sed -i "s/^versionCode=.*/versionCode=$VCODE/" stage/module.prop
           ( cd stage && zip -r9 "../6axmyT-$VER.zip" . )

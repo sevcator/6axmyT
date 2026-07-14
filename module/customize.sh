@@ -20,7 +20,7 @@ set_perm_recursive "$MODPATH/zygisk" 0 0 0755 0644
 
 # First-run config: install defaults, never clobber existing ones
 mkdir -p /data/adb/cloak
-for f in targets.conf props.conf; do
+for f in targets.conf props.conf pif.conf; do
   if [ -f "/data/adb/cloak/$f" ]; then
     ui_print "- Keeping existing /data/adb/cloak/$f"
   else

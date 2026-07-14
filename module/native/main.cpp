@@ -2,6 +2,7 @@
 #include "zygisk.hpp"
 #include "config.hpp"
 #include "hooks.hpp"
+#include "spoof.hpp"
 
 #include <android/log.h>
 #include <sys/socket.h>
@@ -62,24 +63,38 @@ public:
 
     void preAppSpecialize(AppSpecializeArgs *args) override {
         cloak_ = false;
+        spoofGms_ = false;
         std::string pkg = jstr(args->nice_name);
         if (pkg.empty()) { dontUnload_ = false; return; }
 
         if (!fetch_config()) { dontUnload_ = false; return; }
 
-        if (cfg_.shouldCloak(pkg)) {
-            cloak_ = true;
+        // Google Play Integrity / Play Protect certification: spoof a certified
+        // Build fingerprint in the GMS processes (DroidGuard runs in
+        // com.google.android.gms.unstable). Enabled when pif.conf is present.
+        bool isGms = pkg.rfind("com.google.android.gms", 0) == 0;
+        if (isGms && !cfg_.gms_build.empty()) {
+            spoofGms_ = true;
+        }
+
+        if (cfg_.shouldCloak(pkg) || spoofGms_) {
+            cloak_ = cfg_.shouldCloak(pkg);
             dontUnload_ = true;
             // Ask the loader to run its denylist unmount for this process:
             // removes Magisk mounts, su bind-mounts, tmpfs -> root becomes
             // invisible at the filesystem level for this app only.
             api_->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
-            LOGD("cloaking %s", pkg.c_str());
+            LOGD("%s %s", spoofGms_ ? "certify+cloak" : "cloaking", pkg.c_str());
         }
     }
 
     void postAppSpecialize(const AppSpecializeArgs *) override {
-        if (cloak_) {
+        if (spoofGms_) {
+            // Overwrite android.os.Build.* with the certified profile before GMS
+            // reads it (Play Protect certification / MEETS_BASIC_INTEGRITY).
+            cloak::spoof_build(env_, cfg_);
+        }
+        if (cloak_ || spoofGms_) {
             // libc PLT hooks: hide leftover su/magisk paths + fake props,
             // scoped to this process only.
             cloak::install_hooks(api_, &cfg_);
@@ -94,6 +109,7 @@ private:
     JNIEnv *env_ = nullptr;
     cloak::Config cfg_;     // lives for the process; hooks hold a pointer to it
     bool cloak_ = false;
+    bool spoofGms_ = false;
     bool dontUnload_ = false;
 
     std::string jstr(jstring s) {
@@ -104,18 +120,19 @@ private:
         return r;
     }
 
-    // Ask the root companion for the two config files and parse them.
+    // Ask the root companion for the config files and parse them.
     bool fetch_config() {
         int fd = api_->connectCompanion();
         if (fd < 0) { LOGE("companion connect failed"); return false; }
         uint8_t req = 1;
-        std::string targets, props;
+        std::string targets, props, pif;
         bool ok = xwrite(fd, &req, 1) &&
                   read_str(fd, targets) &&
-                  read_str(fd, props);
+                  read_str(fd, props) &&
+                  read_str(fd, pif);
         close(fd);
         if (!ok) { LOGE("companion read failed"); return false; }
-        cfg_ = cloak::parse_config(targets, props);
+        cfg_ = cloak::parse_config(targets, props, pif);
         return true;
     }
 };
@@ -126,8 +143,10 @@ static void companion_handler(int client) {
     if (!xread(client, &req, 1)) return;
     std::string targets = cloak::read_file(std::string(CONF_DIR) + "/targets.conf");
     std::string props   = cloak::read_file(std::string(CONF_DIR) + "/props.conf");
+    std::string pif     = cloak::read_file(std::string(CONF_DIR) + "/pif.conf");
     write_str(client, targets);
     write_str(client, props);
+    write_str(client, pif);
 }
 
 REGISTER_ZYGISK_MODULE(CloakModule)

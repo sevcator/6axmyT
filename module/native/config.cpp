@@ -38,7 +38,8 @@ static void for_each_line(const std::string &text, F fn) {
     }
 }
 
-Config parse_config(const std::string &targets_text, const std::string &props_text) {
+Config parse_config(const std::string &targets_text, const std::string &props_text,
+                    const std::string &pif_text) {
     Config cfg;
 
     for_each_line(targets_text, [&](const std::string &line) {
@@ -57,6 +58,15 @@ Config parse_config(const std::string &targets_text, const std::string &props_te
         std::string k = trim(line.substr(0, eq));
         std::string v = trim(line.substr(eq + 1));
         if (!k.empty()) cfg.props[k] = v;
+    });
+
+    // pif.conf: Build field name = value (FINGERPRINT, MODEL, SECURITY_PATCH, ...)
+    for_each_line(pif_text, [&](const std::string &line) {
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) return;
+        std::string k = trim(line.substr(0, eq));
+        std::string v = trim(line.substr(eq + 1));
+        if (!k.empty()) cfg.gms_build[k] = v;
     });
 
     return cfg;
