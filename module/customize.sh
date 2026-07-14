@@ -18,12 +18,6 @@ ui_print "- Device ABI: $ABI"
 ui_print "- Installing Zygisk library"
 set_perm_recursive "$MODPATH/zygisk" 0 0 0755 0644
 
-# hooks.dex (companion hook library)
-if [ -f "$MODPATH/hooks.dex" ]; then
-  set_perm "$MODPATH/hooks.dex" 0 0 0644
-  ui_print "- Installed companion hooks.dex"
-fi
-
 # First-run config: install defaults, never clobber existing ones
 mkdir -p /data/adb/cloak
 for f in targets.conf props.conf; do
