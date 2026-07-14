@@ -30,5 +30,9 @@ for f in targets.conf props.conf pif.conf; do
   set_perm "/data/adb/cloak/$f" 0 0 0644
 done
 
+# Drop the certification stamp so the boot service refreshes Play's cached
+# "Device is certified" verdict once after this (re)install.
+rm -f /data/adb/cloak/.certified
+
 ui_print "- Edit /data/adb/cloak/targets.conf to choose which apps are cloaked"
 ui_print "- Done. Reboot to activate."
