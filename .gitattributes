@@ -1,0 +1,3 @@
+# This repo builds on Linux CI and runs on Android; keep LF everywhere so shell
+# scripts and sources are never checked out with CRLF.
+* text=auto eol=lf

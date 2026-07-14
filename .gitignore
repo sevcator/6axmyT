@@ -1,0 +1,4 @@
+/out/
+/native/.build/
+# fetched at build time (pinned upstream ABI header); see scripts/build.sh
+/native/zygisk.hpp
