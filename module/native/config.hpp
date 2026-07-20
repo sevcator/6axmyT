@@ -13,11 +13,22 @@ struct Config {
     std::unordered_map<std::string, std::string> props;      // props.conf overrides
     std::unordered_map<std::string, std::string> gms_build;  // pif.conf -> Build fields
 
-    // Should this package receive anti-detection?
-    //   WHITELIST: only if listed.   BLACKLIST: only if NOT listed.
     bool shouldCloak(const std::string &pkg) const {
         bool listed = packages.count(pkg) != 0;
         return mode == WHITELIST ? listed : !listed;
+    }
+
+    // Serialize gms_build to a simple JSON string for the DEX entry point.
+    std::string pif_json() const {
+        std::string j = "{";
+        bool first = true;
+        for (const auto &kv : gms_build) {
+            if (!first) j += ",";
+            j += "\"" + kv.first + "\":\"" + kv.second + "\"";
+            first = false;
+        }
+        j += "}";
+        return j;
     }
 };
 

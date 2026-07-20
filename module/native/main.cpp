@@ -6,6 +6,7 @@
 
 #include <android/log.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <cstdint>
 #include <string>
@@ -80,9 +81,6 @@ public:
         if (cfg_.shouldCloak(pkg) || spoofGms_) {
             cloak_ = cfg_.shouldCloak(pkg);
             dontUnload_ = true;
-            // Ask the loader to run its denylist unmount for this process:
-            // removes Magisk mounts, su bind-mounts, tmpfs -> root becomes
-            // invisible at the filesystem level for this app only.
             api_->setOption(zygisk::FORCE_DENYLIST_UNMOUNT);
             LOGD("%s %s", spoofGms_ ? "certify+cloak" : "cloaking", pkg.c_str());
         }
@@ -90,13 +88,18 @@ public:
 
     void postAppSpecialize(const AppSpecializeArgs *) override {
         if (spoofGms_) {
-            // Overwrite android.os.Build.* with the certified profile before GMS
-            // reads it (Play Protect certification / MEETS_BASIC_INTEGRITY).
             cloak::spoof_build(env_, cfg_);
+
+            // Load the DEX hook to intercept KeyStore attestation.
+            // This blocks hardware attestation chains (which reveal the unlocked
+            // bootloader) and forces DroidGuard down the software/basic evaluation
+            // path — the best shot at DEVICE_INTEGRITY without a keybox.
+            if (!dexPath_.empty()) {
+                std::string pif_json = cfg_.pif_json();
+                cloak::load_dex(env_, dexPath_, pif_json);
+            }
         }
         if (cloak_ || spoofGms_) {
-            // libc PLT hooks: hide leftover su/magisk paths + fake props,
-            // scoped to this process only.
             cloak::install_hooks(api_, &cfg_);
         }
         if (!dontUnload_) {
@@ -108,6 +111,7 @@ private:
     Api *api_ = nullptr;
     JNIEnv *env_ = nullptr;
     cloak::Config cfg_;     // lives for the process; hooks hold a pointer to it
+    std::string dexPath_;   // path to classes.dex (from companion)
     bool cloak_ = false;
     bool spoofGms_ = false;
     bool dontUnload_ = false;
@@ -125,28 +129,52 @@ private:
         int fd = api_->connectCompanion();
         if (fd < 0) { LOGE("companion connect failed"); return false; }
         uint8_t req = 1;
-        std::string targets, props, pif;
+        std::string targets, props, pif, dex_path;
         bool ok = xwrite(fd, &req, 1) &&
                   read_str(fd, targets) &&
                   read_str(fd, props) &&
-                  read_str(fd, pif);
+                  read_str(fd, pif) &&
+                  read_str(fd, dex_path);
         close(fd);
         if (!ok) { LOGE("companion read failed"); return false; }
         cfg_ = cloak::parse_config(targets, props, pif);
+        dexPath_ = dex_path;
         return true;
     }
 };
 
 // ---- root companion: serves the config files to app processes ----
+static const char *MODULE_DIR = "/data/adb/modules/cloak";
+
+static std::string find_dex_path() {
+    // After FORCE_DENYLIST_UNMOUNT, /data/adb/modules/ is hidden from the app
+    // process. Copy the DEX to /data/local/tmp where it remains visible.
+    std::string src = std::string(MODULE_DIR) + "/classes.dex";
+    std::string dst = "/data/local/tmp/cloak_classes.dex";
+    struct stat st;
+    if (stat(src.c_str(), &st) != 0) return "";
+    // Always copy (module update may have changed the DEX)
+    std::string data = cloak::read_file(src);
+    if (data.empty()) return "";
+    FILE *f = fopen(dst.c_str(), "we");
+    if (!f) return "";
+    fwrite(data.data(), 1, data.size(), f);
+    fclose(f);
+    chmod(dst.c_str(), 0644);
+    return dst;
+}
+
 static void companion_handler(int client) {
     uint8_t req = 0;
     if (!xread(client, &req, 1)) return;
-    std::string targets = cloak::read_file(std::string(CONF_DIR) + "/targets.conf");
-    std::string props   = cloak::read_file(std::string(CONF_DIR) + "/props.conf");
-    std::string pif     = cloak::read_file(std::string(CONF_DIR) + "/pif.conf");
+    std::string targets  = cloak::read_file(std::string(CONF_DIR) + "/targets.conf");
+    std::string props    = cloak::read_file(std::string(CONF_DIR) + "/props.conf");
+    std::string pif      = cloak::read_file(std::string(CONF_DIR) + "/pif.conf");
+    std::string dex_path = find_dex_path();
     write_str(client, targets);
     write_str(client, props);
     write_str(client, pif);
+    write_str(client, dex_path);
 }
 
 REGISTER_ZYGISK_MODULE(CloakModule)

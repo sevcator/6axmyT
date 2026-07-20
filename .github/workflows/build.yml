@@ -39,6 +39,29 @@ jobs:
           echo "VCODE=$VCODE" >> "$GITHUB_ENV"
           echo "Resolved version: $VER ($VCODE)"
 
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build DEX hook
+        run: |
+          set -euo pipefail
+          ANDROID_JAR="$ANDROID_SDK_ROOT/platforms/android-34/android.jar"
+          # Fall back if android-34 not present
+          [ -f "$ANDROID_JAR" ] || ANDROID_JAR=$(find "$ANDROID_SDK_ROOT/platforms" -name android.jar | sort | tail -1)
+          mkdir -p module/java/build/classes
+          javac -source 17 -target 17 -cp "$ANDROID_JAR" \
+                -d module/java/build/classes \
+                module/java/src/EntryPoint.java
+          java -cp "$ANDROID_SDK_ROOT/build-tools/$(ls $ANDROID_SDK_ROOT/build-tools | tail -1)/lib/d8.jar" \
+               com.android.tools.r8.D8 --min-api 29 --lib "$ANDROID_JAR" \
+               --output module/java/build \
+               $(find module/java/build/classes -name '*.class')
+          cp module/java/build/classes.dex module/classes.dex
+          echo "DEX built: $(wc -c < module/classes.dex) bytes"
+
       - name: Build native + package
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
@@ -65,10 +88,9 @@ jobs:
             echo "built $abi"
           done
 
-          # Flashable module (runtime files only). The version is stamped into the
-          # packaged copy from the resolved version — the source tree is untouched.
           cp module/module.prop module/customize.sh module/uninstall.sh \
              module/service.sh module/action.sh module/system.prop \
+             module/classes.dex \
              module/targets.conf module/props.conf module/pif.conf stage/
           sed -i "s/^version=.*/version=$VER/"           stage/module.prop
           sed -i "s/^versionCode=.*/versionCode=$VCODE/" stage/module.prop

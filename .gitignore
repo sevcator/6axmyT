@@ -4,3 +4,4 @@
 *.zip
 # fetched at build time (pinned upstream ABI header); see the workflow
 module/native/zygisk.hpp
+module/java/build/
