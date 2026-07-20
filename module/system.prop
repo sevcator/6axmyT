@@ -1,0 +1,18 @@
+# 6axmyT — system-wide boot state spoofing via Magisk resetprop.
+#
+# These are INFORMATIONAL-ONLY props that apps read to determine lock state.
+# Changing them does NOT affect actual system behavior, ADB access, or root.
+#
+# WARNING: NEVER add ro.debuggable=0 here — it broke ADB + root on this
+# userdebug build before (set_policy_failed:/data/adb, bootloop).
+# NEVER add ro.secure, ro.adb.secure — same risk.
+
+ro.boot.verifiedbootstate=green
+ro.boot.flash.locked=1
+ro.boot.vbmeta.device_state=locked
+sys.oem_unlock_allowed=0
+ro.boot.warranty_bit=0
+ro.warranty_bit=0
+ro.boot.selinux=enforcing
+ro.secureboot.lockstate=locked
+vendor.boot.verifiedbootstate=green

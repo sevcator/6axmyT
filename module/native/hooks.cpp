@@ -94,14 +94,50 @@ static ssize_t h_readlinkat(int d, const char *p, char *b, size_t n) {
     return o_readlinkat(d, p, b, n);
 }
 
+// ---- hardcoded boot-state props: always spoofed in every cloaked process ----
+// Duck Detector reads these to determine "Boot state: Unlocked". We return the
+// values a locked, verified-boot device would have. These are informational-only
+// labels; changing them has zero effect on actual system behavior.
+static const struct { const char *name; const char *value; } kBootProps[] = {
+    {"ro.boot.verifiedbootstate",   "green"},
+    {"ro.boot.flash.locked",        "1"},
+    {"ro.boot.vbmeta.device_state", "locked"},
+    {"sys.oem_unlock_allowed",      "0"},
+    {"ro.boot.warranty_bit",        "0"},
+    {"ro.warranty_bit",             "0"},
+    {"ro.boot.selinux",             "enforcing"},
+    {"ro.secureboot.lockstate",     "locked"},
+    {"vendor.boot.verifiedbootstate", "green"},
+    {"ro.boot.vbmeta.digest",       ""},
+    {"ro.is_ever_orange",           "0"},
+};
+
+static const char *find_boot_prop(const char *name) {
+    for (const auto &bp : kBootProps)
+        if (strcmp(name, bp.name) == 0) return bp.value;
+    return nullptr;
+}
+
 // ---- property faking (classic API) ----
 static int h_prop_get(const char *name, char *value) {
-    if (g_cfg && name) {
-        auto it = g_cfg->props.find(name);
-        if (it != g_cfg->props.end()) {
-            size_t n = it->second.copy(value, 91);  // PROP_VALUE_MAX-ish
+    if (name) {
+        // Boot state props: hardcoded, highest priority
+        const char *bp = find_boot_prop(name);
+        if (bp) {
+            size_t n = strlen(bp);
+            if (n > 91) n = 91;
+            memcpy(value, bp, n);
             value[n] = '\0';
             return (int) n;
+        }
+        // Config-based prop overrides
+        if (g_cfg) {
+            auto it = g_cfg->props.find(name);
+            if (it != g_cfg->props.end()) {
+                size_t n = it->second.copy(value, 91);
+                value[n] = '\0';
+                return (int) n;
+            }
         }
     }
     return o_prop_get(name, value);
@@ -114,10 +150,14 @@ struct CbCtx {
 };
 static void cb_trampoline(void *cookie, const char *name, const char *value, uint32_t serial) {
     auto *ctx = static_cast<CbCtx *>(cookie);
-    if (g_cfg && name) {
-        auto it = g_cfg->props.find(name);
-        if (it != g_cfg->props.end())
-            value = it->second.c_str();  // substitute faked value
+    if (name) {
+        const char *bp = find_boot_prop(name);
+        if (bp) { value = bp; }
+        else if (g_cfg) {
+            auto it = g_cfg->props.find(name);
+            if (it != g_cfg->props.end())
+                value = it->second.c_str();
+        }
     }
     ctx->user_cb(ctx->user_cookie, name, value, serial);
 }

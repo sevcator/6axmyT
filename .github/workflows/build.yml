@@ -68,7 +68,8 @@ jobs:
           # Flashable module (runtime files only). The version is stamped into the
           # packaged copy from the resolved version — the source tree is untouched.
           cp module/module.prop module/customize.sh module/uninstall.sh \
-             module/service.sh module/targets.conf module/props.conf module/pif.conf stage/
+             module/service.sh module/action.sh module/system.prop \
+             module/targets.conf module/props.conf module/pif.conf stage/
           sed -i "s/^version=.*/version=$VER/"           stage/module.prop
           sed -i "s/^versionCode=.*/versionCode=$VCODE/" stage/module.prop
           ( cd stage && zip -r9 "../6axmyT-$VER.zip" . )

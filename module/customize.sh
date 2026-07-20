@@ -34,5 +34,15 @@ done
 # "Device is certified" verdict once after this (re)install.
 rm -f /data/adb/cloak/.certified
 
+# Ensure GMS is not on the DenyList (blocks Zygisk injection = no cert hook)
+magisk --denylist rm com.google.android.gms >/dev/null 2>&1
+magisk --denylist rm com.android.vending >/dev/null 2>&1
+
+ui_print ""
 ui_print "- Edit /data/adb/cloak/targets.conf to choose which apps are cloaked"
+ui_print "- Enable features by creating flag files in /data/adb/cloak/:"
+ui_print "    touch /data/adb/cloak/auto_update_fp  — auto-update fingerprint"
+ui_print "    touch /data/adb/cloak/auto_blacklist   — auto-detect banking apps"
+ui_print "    touch /data/adb/cloak/auto_update      — self-update from GitHub"
+ui_print "- Tap the module's action button in Magisk for status + manual refresh"
 ui_print "- Done. Reboot to activate."
