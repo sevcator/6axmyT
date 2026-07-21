@@ -128,6 +128,7 @@ static const struct { const char *name; const char *value; } kBootProps[] = {
     {"ro.vendor.warranty_bit",        "0"},
     {"ro.boot.realmebootstate",       "green"},
     {"ro.boot.realme.lockstate",      "1"},
+    {"persist.sys.usb.config",        "mtp"},
 };
 
 // Props where "userdebug" in the real value is replaced with "user".
