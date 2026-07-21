@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cerrno>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -99,17 +100,48 @@ static ssize_t h_readlinkat(int d, const char *p, char *b, size_t n) {
 // values a locked, verified-boot device would have. These are informational-only
 // labels; changing them has zero effect on actual system behavior.
 static const struct { const char *name; const char *value; } kBootProps[] = {
-    {"ro.boot.verifiedbootstate",   "green"},
-    {"ro.boot.flash.locked",        "1"},
-    {"ro.boot.vbmeta.device_state", "locked"},
-    {"sys.oem_unlock_allowed",      "0"},
-    {"ro.boot.warranty_bit",        "0"},
-    {"ro.warranty_bit",             "0"},
-    {"ro.boot.selinux",             "enforcing"},
-    {"ro.secureboot.lockstate",     "locked"},
+    {"ro.boot.verifiedbootstate",     "green"},
+    {"ro.boot.flash.locked",          "1"},
+    {"ro.boot.vbmeta.device_state",   "locked"},
+    {"sys.oem_unlock_allowed",        "0"},
+    {"ro.boot.warranty_bit",          "0"},
+    {"ro.warranty_bit",               "0"},
+    {"ro.boot.selinux",               "enforcing"},
+    {"ro.secureboot.lockstate",       "locked"},
     {"vendor.boot.verifiedbootstate", "green"},
-    {"ro.boot.vbmeta.digest",       ""},
-    {"ro.is_ever_orange",           "0"},
+    {"vendor.boot.vbmeta.device_state","locked"},
+    {"ro.is_ever_orange",             "0"},
+    {"ro.debuggable",                 "0"},
+    {"ro.force.debuggable",           "0"},
+    {"ro.secure",                     "1"},
+    {"ro.adb.secure",                 "1"},
+    {"ro.build.type",                 "user"},
+    {"ro.build.tags",                 "release-keys"},
+    {"ro.product.build.type",         "user"},
+    {"ro.system.build.type",          "user"},
+    {"ro.system_ext.build.type",      "user"},
+    {"ro.vendor.build.type",          "user"},
+    {"ro.vendor_dlkm.build.type",     "user"},
+    {"ro.bootimage.build.type",       "user"},
+    {"ro.boot.veritymode",            "enforcing"},
+    {"ro.vendor.boot.warranty_bit",   "0"},
+    {"ro.vendor.warranty_bit",        "0"},
+    {"ro.boot.realmebootstate",       "green"},
+    {"ro.boot.realme.lockstate",      "1"},
+};
+
+// Props where "userdebug" in the real value is replaced with "user".
+// These have device-specific prefixes so we can't hardcode the full value.
+static const char *const kDebugReplaceProps[] = {
+    "ro.build.flavor",
+    "ro.build.display.id",
+};
+
+// Recovery mode props: spoof only when the real value contains "recovery"
+static const struct { const char *name; const char *spoof; } kRecoveryProps[] = {
+    {"ro.bootmode",           "unknown"},
+    {"ro.boot.bootmode",      "unknown"},
+    {"vendor.boot.bootmode",  "unknown"},
 };
 
 static const char *find_boot_prop(const char *name) {
@@ -118,10 +150,46 @@ static const char *find_boot_prop(const char *name) {
     return nullptr;
 }
 
+// ---- directory listing hiding: filter magisk entries from readdir ----
+static struct dirent *(*o_readdir)(DIR *);
+static struct dirent *h_readdir(DIR *dir) {
+    struct dirent *entry;
+    while ((entry = o_readdir(dir)) != nullptr) {
+        if (entry->d_name[0] && (is_blocked(entry->d_name) || basename_is_su(entry->d_name)))
+            continue;
+        break;
+    }
+    return entry;
+}
+
+// ---- recovery mode prop check ----
+static const char *find_recovery_prop(const char *name) {
+    for (const auto &rp : kRecoveryProps)
+        if (strcmp(name, rp.name) == 0) return rp.spoof;
+    return nullptr;
+}
+
+static bool is_debug_replace_prop(const char *name) {
+    for (const char *p : kDebugReplaceProps)
+        if (strcmp(name, p) == 0) return true;
+    return false;
+}
+
+// In-place replace first occurrence of "userdebug" with "user" in buf.
+// Returns new string length.
+static int replace_userdebug(char *buf, int len) {
+    char *pos = strstr(buf, "userdebug");
+    if (!pos) return len;
+    // "userdebug" (9) -> "user" (4), shift tail left by 5
+    int tail = len - (int)(pos - buf) - 9;
+    memmove(pos + 4, pos + 9, tail + 1); // +1 for NUL
+    memcpy(pos, "user", 4);
+    return len - 5;
+}
+
 // ---- property faking (classic API) ----
 static int h_prop_get(const char *name, char *value) {
     if (name) {
-        // Boot state props: hardcoded, highest priority
         const char *bp = find_boot_prop(name);
         if (bp) {
             size_t n = strlen(bp);
@@ -130,7 +198,24 @@ static int h_prop_get(const char *name, char *value) {
             value[n] = '\0';
             return (int) n;
         }
-        // Config-based prop overrides
+        // Recovery mode props: only spoof if real value contains "recovery"
+        const char *rp = find_recovery_prop(name);
+        if (rp) {
+            int len = o_prop_get(name, value);
+            if (len > 0 && strstr(value, "recovery")) {
+                size_t n = strlen(rp);
+                memcpy(value, rp, n);
+                value[n] = '\0';
+                return (int) n;
+            }
+            return len;
+        }
+        // Dynamic "userdebug" → "user" replacement for compound props
+        if (is_debug_replace_prop(name)) {
+            int len = o_prop_get(name, value);
+            if (len > 0) return replace_userdebug(value, len);
+            return len;
+        }
         if (g_cfg) {
             auto it = g_cfg->props.find(name);
             if (it != g_cfg->props.end()) {
@@ -148,15 +233,28 @@ struct CbCtx {
     void (*user_cb)(void *, const char *, const char *, uint32_t);
     void *user_cookie;
 };
+static thread_local char tl_cb_buf[256];
 static void cb_trampoline(void *cookie, const char *name, const char *value, uint32_t serial) {
     auto *ctx = static_cast<CbCtx *>(cookie);
     if (name) {
         const char *bp = find_boot_prop(name);
         if (bp) { value = bp; }
-        else if (g_cfg) {
-            auto it = g_cfg->props.find(name);
-            if (it != g_cfg->props.end())
-                value = it->second.c_str();
+        else {
+            const char *rp = find_recovery_prop(name);
+            if (rp && value && strstr(value, "recovery")) {
+                value = rp;
+            } else if (is_debug_replace_prop(name) && value && strstr(value, "userdebug")) {
+                size_t n = strlen(value);
+                if (n < sizeof(tl_cb_buf)) {
+                    memcpy(tl_cb_buf, value, n + 1);
+                    replace_userdebug(tl_cb_buf, (int)n);
+                    value = tl_cb_buf;
+                }
+            } else if (g_cfg) {
+                auto it = g_cfg->props.find(name);
+                if (it != g_cfg->props.end())
+                    value = it->second.c_str();
+            }
         }
     }
     ctx->user_cb(ctx->user_cookie, name, value, serial);
@@ -183,6 +281,7 @@ static const HookSpec kHooks[] = {
     {"readlinkat", (void *) h_readlinkat, (void **) &o_readlinkat},
     {"__system_property_get",           (void *) h_prop_get,     (void **) &o_prop_get},
     {"__system_property_read_callback", (void *) h_prop_read_cb, (void **) &o_prop_read_cb},
+    {"readdir",                         (void *) h_readdir,      (void **) &o_readdir},
 };
 
 // The Zygisk API patches the GOT of a specific loaded ELF, identified by

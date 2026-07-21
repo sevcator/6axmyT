@@ -5,7 +5,8 @@
 #   2. One-time Play certification refresh after install
 #   3. Auto-update fingerprint from pifsync
 #   4. Auto-detect banking/payment apps and add to targets.conf
-#   5. Self-update from GitHub releases
+#   5. Dependency module management (Shamiko, TEESimulator, PIF)
+#   6. Self-update from GitHub releases
 
 MODDIR="${0%/*}"
 CONF="/data/adb/cloak"
@@ -164,7 +165,15 @@ auto_scan_apps() {
     [ $ADDED -eq 0 ] && log "scan: no new apps found"
 }
 
-# ---------- 5. Self-update ----------
+# ---------- 5. Dependency module management ----------
+manage_deps() {
+    [ -f "$CONF/modules.conf" ] || return
+    log "deps: starting module check"
+    sh "$MODDIR/manager.sh" boot
+}
+manage_deps
+
+# ---------- 6. Self-update ----------
 self_update() {
     [ ! -f "$CONF/auto_update" ] && return
     log "update: checking GitHub for new release"

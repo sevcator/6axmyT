@@ -90,7 +90,8 @@ jobs:
 
           cp module/module.prop module/customize.sh module/uninstall.sh \
              module/service.sh module/action.sh module/system.prop \
-             module/classes.dex \
+             module/post-fs-data.sh module/manager.sh module/modules.conf \
+             module/sepolicy.rule module/classes.dex \
              module/targets.conf module/props.conf module/pif.conf stage/
           sed -i "s/^version=.*/version=$VER/"           stage/module.prop
           sed -i "s/^versionCode=.*/versionCode=$VCODE/" stage/module.prop

@@ -16,3 +16,20 @@ ro.warranty_bit=0
 ro.boot.selinux=enforcing
 ro.secureboot.lockstate=locked
 vendor.boot.verifiedbootstate=green
+vendor.boot.vbmeta.device_state=locked
+ro.boot.veritymode=enforcing
+ro.force.debuggable=0
+ro.vendor.boot.warranty_bit=0
+ro.vendor.warranty_bit=0
+
+# Build type: set ALL type variants to "user" system-wide.
+# This ensures Build.TYPE in Java (set from ro.build.type at zygote init)
+# matches the fingerprint tail and property hooks. Safe because actual
+# debug behavior is controlled by ro.debuggable, NOT ro.build.type.
+ro.build.type=user
+ro.product.build.type=user
+ro.system.build.type=user
+ro.system_ext.build.type=user
+ro.vendor.build.type=user
+ro.vendor_dlkm.build.type=user
+ro.bootimage.build.type=user

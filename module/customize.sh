@@ -20,7 +20,7 @@ set_perm_recursive "$MODPATH/zygisk" 0 0 0755 0644
 
 # First-run config: install defaults, never clobber existing ones
 mkdir -p /data/adb/cloak
-for f in targets.conf props.conf pif.conf; do
+for f in targets.conf props.conf pif.conf modules.conf; do
   if [ -f "/data/adb/cloak/$f" ]; then
     ui_print "- Keeping existing /data/adb/cloak/$f"
   else
@@ -39,10 +39,13 @@ magisk --denylist rm com.google.android.gms >/dev/null 2>&1
 magisk --denylist rm com.android.vending >/dev/null 2>&1
 
 ui_print ""
-ui_print "- Edit /data/adb/cloak/targets.conf to choose which apps are cloaked"
-ui_print "- Enable features by creating flag files in /data/adb/cloak/:"
+ui_print ""
+ui_print "- Module manager will auto-install dependencies on first boot"
+ui_print "- Edit /data/adb/cloak/modules.conf to manage PI stack modules"
+ui_print "- Edit /data/adb/cloak/targets.conf to choose cloaked apps"
+ui_print "- Enable features with flag files in /data/adb/cloak/:"
 ui_print "    touch /data/adb/cloak/auto_update_fp  — auto-update fingerprint"
 ui_print "    touch /data/adb/cloak/auto_blacklist   — auto-detect banking apps"
 ui_print "    touch /data/adb/cloak/auto_update      — self-update from GitHub"
-ui_print "- Tap the module's action button in Magisk for status + manual refresh"
+ui_print "- Tap the action button in Magisk for dashboard + manual updates"
 ui_print "- Done. Reboot to activate."
