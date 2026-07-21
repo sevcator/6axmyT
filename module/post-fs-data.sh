@@ -17,6 +17,12 @@ done
 # but TEE attestation reports verifiedBootHash — Duck Detector cross-checks
 # the two and flags "Digest missing" or "did not match".
 # The cached hash is written by service.sh after a KeyStore attestation probe.
+# Spoof USB config: Duck Detector flags persist.sys.usb.config=adb as Warning.
+# resetprop bypasses property change triggers so USB gadget won't reconfigure.
+case "$(resetprop persist.sys.usb.config 2>/dev/null)" in
+    *adb*) resetprop persist.sys.usb.config mtp ;;
+esac
+
 VBHASH="/data/adb/cloak/vbmeta_hash"
 if [ -z "$(getprop ro.boot.vbmeta.digest 2>/dev/null)" ] && [ -f "$VBHASH" ]; then
     DIGEST=$(cat "$VBHASH" 2>/dev/null | head -1 | tr -d '[:space:]')
